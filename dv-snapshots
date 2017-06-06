@@ -1,0 +1,335 @@
+#!/usr/bin/bash
+#: Title	: dv-snapshots
+#: Date		: 2017-06-01
+#: Author	: ValV <valv at linuxmail dot org>
+#: Version	: 1.1
+#: Description	: Automates creating, destroying, and archiving snapshots.
+#:		  Uses external lvm2, tar, and 7z programs.
+#: Synopsis	: dv-snapshots [options] <enable|disable|backup [path]>
+#: Options	: -d - Destination directory to save snapshot archives
+#:		  -p - Password to encrypt snapshot archives
+
+unalias -a
+
+# If run as ordianry user - try to elevate privileges
+if [[ $EUID -ne 0 ]]; then
+	sudo "$0" "$@"
+	exit $?
+fi
+
+##############################################################################
+#                                  VARIABLES                                 #
+##############################################################################
+PRNAME="${0##*/}"
+PRAUTH="ValV <valv at linuxmail dot org>"
+PRVERS="1.1"
+PRDESC=("Automates creating, destroying, and archiving snapshots."
+	"Uses external lvm, tar, 7z and some other programs.")
+PRSYNS=("enable"
+	"disable"
+	"[-p <password>] backup <path>"
+	"-d <path> [-p <password>] backup")
+PRCMDS=("enable"\
+	"Activate lvm2 snapshots for logical volumes"\
+	"disable"\
+	"Turn off and destroy lvm2 snapshots"\
+	"backup"\
+	"Create *.tar.7z archives for each snapshot")
+PROPTS=("-d <path>"
+	"Destination directory to save snapshot archives"
+	"-p <password>"
+	"Password to encrypt snapshot archives (7z)")
+
+SRCDIR="/run/${PRNAME//-//}"
+OUTDIR=""
+PASSWD=""
+
+PREFIX="s"
+# Array of LVs of the format: "vg/lv:extents:extra tar options"
+# TODO: Fix --exclude= option to avoid only packages (*.pkg.tar.xz)
+LVARRY=("vg/lv:512:--exclude=./src --exclude=./cache/pacman/pkg"
+	"vg/lv:256:"
+	"")
+CMDTAR="tar -cvf - --one-file-system --exclude=lost+found"
+CMD7ZA="7z a -si -mx=9 -ms=on -mhe=on"
+
+##############################################################################
+#                                 FUNCTIONS                                  #
+##############################################################################
+
+function check_user_writable {
+	#: Description	: Check if $1 directory is writable by $SUDO_USER
+	#: Options	: $1 - directory to check
+	# Return -1 if $1 is not provided
+	#[[ ${1:+X} == X ]] || return -1
+	local USER=$SUDO_USER
+	# Get target directory info (following symlinks)
+	local INFO=($(stat -L -c "0%a %G %U" "$1"))
+	local PERMS=${INFO[0]}
+	local GROUP=${INFO[1]}
+	local OWNER=${INFO[2]}
+	if ((($PERMS & 0002) != 0)); then
+		# $1 has write permissions for everyone
+		return 0
+	elif ((($PERMS & 0020) != 0)); then
+		# $1 has group write permissions
+		# Get all the groups the $USER is in
+		local Groups=($(\groups $USER))
+		for G in "${Groups[@]}"; do
+			# The $USER's group match with the $1's one
+			[[ $GROUP == $G ]] && return 0
+		done
+	elif ((($PERMS & 0200) != 0)); then
+		# $1 has only owner write permissions
+		[[ $USER == $OWNER ]] && return 0
+	fi
+	# If the $SUDO_USER can't write to the $1 - then return non-zero
+	return -1
+}
+
+function show_help {
+	#: Description	: Display usage
+	#: Options	: None
+	printf "%s:\n" "$PRNAME"
+	set -- "${PRDESC[@]}"
+	while [[ $# > 0 ]]; do
+		printf "\t%s\n" "$1"
+		shift
+	done
+	printf "Synopsis:\n"
+	set -- "${PRSYNS[@]}"
+	while [[ $# > 0 ]]; do
+		printf "\t$PRNAME %s\n" "$1"
+		shift
+	done
+	printf "Commands:\n"
+	set -- "${PRCMDS[@]}"
+	while [[ $# > 0 ]]; do
+		printf "\t%s\t\t%s\n" "$1" "$2"
+		shift 2
+	done
+	printf "Options:\n"
+	set -- "${PROPTS[@]}"
+	while [[ $# > 0 ]]; do
+		printf "\t%s\t%s\n" "$1" "$2"
+		shift 2
+	done
+}
+
+##############################################################################
+#                                COMMAND LINE                                #
+##############################################################################
+
+# Get the command line arguments
+ARGV=$(getopt -qo 'd:p:' -- "$@")
+
+# Show help and exit if the command line is incorrect
+[[ $? -ne 0 ]] && show_help && exit 1
+
+# Replace positional variables with the parsed ones
+eval set -- "$ARGV"
+unset ARGV
+
+# Consume positional variables (parse options)
+while true; do
+	# Break on contents
+	case $1 in
+		'-d')
+			# Directory is given as an option
+			OUTDIR=$2
+			shift 2
+			continue
+			;;	
+		'-p')
+			# Password is given as an option
+			PASSWD=$2
+			shift 2
+			continue
+			;;
+		'--')
+			# After this option ordinary arguments follow
+			shift
+			break
+			;;
+		*)
+			# This is unusual and must be  rare
+			echo 'Error parsing command line options' >&2
+			exit 2
+			;;
+	esac
+done
+
+# Get time stamp for backup archive names
+TIMESTAMP=$(date +"%F-%H-%M-%S")
+
+##############################################################################
+#                          Process script commands                           #
+##############################################################################
+
+case $1 in
+	test*)
+		while IFS=: read L E O; do
+			[[ ${L:+X} == X ]] && SSNAME=$PREFIX${L##*/} \
+			&& printf "lvcreate -l$E -Cy -ay -n$SSNAME -s $L\n" \
+			&& MPOINT=$SRCDIR/$SSNAME && printf "mkdir -pv $MPOINT\n" \
+			&& printf "mount -v /dev/${L%/*}/$SSNAME $MPOINT\n"
+		done < <(printf "%s\n" "${LVARRY[@]}")
+		while IFS=: read L E O; do
+			[[ ${L:+X} == X ]] && SSNAME=$PREFIX${L##*/} \
+			&& printf "umount -v /dev/${L%/*}/$SSNAME\n" \
+			&& printf "lvremove ${L%/*}/$SSNAME\n"
+		done < <(printf "%s\n" "${LVARRY[@]}")
+		declare -a MTDIRS
+		while IFS=: read L E O; do
+			[[ ${L:+X} == X ]] && SSNAME=$PREFIX${L##*/} \
+			&& MPOINT=$SRCDIR/$SSNAME && \
+			if [[ $(stat -Lc "%m" "$MPOINT") != "$MPOINT" ]]; then
+				printf "\e[01;31mERROR:\e[00m %s %s\n%s %s\n" \
+					"$MPOINT is not mounted - " \
+					"refuse to continue" \
+					"Activate snapshots first " \
+					"with: $PRNAME ${PRCMDS[0]}"
+				#exit 5
+				MTDIRS[${#MTDIRS}]="$MPOINT:$O"
+			fi
+		done < <(printf "%s\n" "${LVARRY[@]}")
+		printf "MTDIRS: %s\n" "${MTDIRS[@]}"
+		;;
+	help*)
+		show_help
+		;;
+	enable*)
+		# Show help if there are crap arguments to the command
+		(($# > 1)) && show_help && exit 3
+		###############################################################
+		# Create & mount snapshots                                    #
+		###############################################################
+		while IFS=: read L E O; do
+			# Check L (lv) not null and set SSNAME (snapshot name)
+			# and try to lvcreate (extents, snapshot name, lv)
+			# then set MPOINT (mount point) and mkdir
+			# and mount (/dev/vg/snapshot name, mount point)
+			[[ ${L:+X} == X ]] && SSNAME=$PREFIX${L##*/} \
+			&& { lvcreate -l$E -Cy -ay -n$SSNAME -s $L;
+			MPOINT=$SRCDIR/$SSNAME && mkdir -pv $MPOINT \
+			&& mount -v /dev/${L%/*}/$SSNAME $MPOINT; }
+		done < <(printf "%s\n" "${LVARRY[@]}")
+		;;
+	disable*)
+		# Show help if there are crap arguments to the command
+		(($# > 1)) && show_help && exit 4
+		###############################################################
+		# Unmount & remove snapshots                                  #
+		###############################################################
+		while IFS=: read L E O; do
+			# Check L (lv) not null and set SSNAME (snapshot name)
+			# and try to umount (/dev/vg/snapshot name)
+			# then lvremove (vg/snapshot name)
+			[[ ${L:+X} == X ]] && SSNAME=$PREFIX${L##*/} \
+			&& { umount -v /dev/${L%/*}/$SSNAME;
+			lvremove -y ${L%/*}/$SSNAME; }
+		done < <(printf "%s\n" "${LVARRY[@]}")
+		;;
+	backup*)
+		###############################################################
+		# Check input directories are mounted                         #
+		###############################################################
+		declare -a MTDIRS
+		while IFS=: read L E O; do
+			[[ ${L:+X} == X ]] && SSNAME=$PREFIX${L##*/} \
+			&& MPOINT=$SRCDIR/$SSNAME && \
+			if [[ $(stat -Lc "%m" "$MPOINT") == "$MPOINT" ]]; then
+				MTDIRS[${#MTDIRS}]="$MPOINT:$O"
+			fi
+		done < <(printf "%s\n" "${LVARRY[@]}")
+		if [[ ${#MTDIRS} > 0  ]]; then
+			printf "Mount points found:\n"
+			printf "\t%s\n" "${MTDIRS[@]}"
+		else
+			printf "\e[01;31mERROR:\e[00m %s\n%s\n" \
+				"No mount points are found - nothing to do" \
+				"Activate snapshots with: $PRNAME ${PRCMDS[0]}"
+			exit 5
+		fi
+		###############################################################
+		# Check output directories are provided on the command line   #
+		###############################################################
+		if [[ -d $OUTDIR ]]; then
+			# Show help if any extra arguments and -d option given
+			(($# > 1)) && show_help && exit 6
+		elif [[ -d "$2" ]]; then
+			# Show help if there are crap arguments to the command
+			(($# > 2)) && show_help && exit 7
+			OUTDIR=$2
+		else
+			show_help && exit 8
+		fi
+		# Canonicalize output directory path
+		OUTDIR="$(readlink -f $OUTDIR)"
+		###############################################################
+		# Check password is provided on the command line              #
+		###############################################################
+		if [[ -z $PASSWD ]]; then
+			# No password is given (perhaps mistake)
+			echo -e "\033[01;33mWARNING:\033[00m" No \
+				password is provided - archives will \
+				not be encrypted
+			echo -n Continue? \[Y\|n\]:
+			# Repeat asking for 'Y'es, 'N'o, or empty answer,
+			# check the answer and exit if 'N'o
+			while :; do
+				read -sn1
+				if [[ $REPLY =~ [Yy] || -z $REPLY ]]; then
+					echo $REPLY
+					break
+				elif [[ $REPLY =~ [Nn] ]]; then
+					echo $REPLY
+					exit 9
+				fi
+			done
+		else
+			# Add the password to the command
+			CMD7ZA="$CMD7ZA -p$PASSWD"
+		fi
+		###############################################################
+		# Try to create archives as ordinary user (if possible)       #
+		###############################################################
+		if check_user_writable "$OUTDIR"; then
+			CMD7ZA="sudo -u $SUDO_USER $CMD7ZA"
+		fi
+		###############################################################
+		# Check available memory                                      #
+		###############################################################
+		set -- $(grep -i MemAvailable /proc/meminfo)
+		# Warn if available RAM is less than 2.5 Gb (TODO: set as var)
+		if [[ $3 == 'kB' && $2 < 2621440 ]]; then
+			echo -e "\033[01;33mWARNING:\033[00m" Available \
+				memory is $2 $3 \(less than 2621440 kB\) - \
+				it is unsafe
+			echo -n Continue? \[y\|N\]:
+			# Repeat asking for 'Y'es, 'N'o, or empty answer,
+			# check the answer and exit if 'N'o
+			while true; do
+				read -sn1
+				if [[ $REPLY =~ [Yy] ]]; then
+					echo $REPLY
+					break
+				elif [[ $REPLY =~ [Nn] || -z $REPLY ]]; then
+					echo $REPLY
+					exit 10
+				fi
+			done
+		fi
+		###############################################################
+		# Create archives                                             #
+		###############################################################
+		while IFS=: read M O; do
+			COMMAND="$CMDTAR -C ${M} $O . | \
+				$CMD7ZA $OUTDIR/${M##*/}-$TIMESTAMP.tar.7z"
+			echo -en "\033[01;32m${M##*/}:\033[00m "
+			echo $COMMAND
+		done < <(printf "%s\n" "${MTDIRS[@]}")
+		;;
+	*)
+		show_help && exit 11
+esac
