@@ -59,7 +59,7 @@ CMD7ZA="7z a -si -mx=9 -ms=on -mhe=on"
 ##############################################################################
 
 function check_user_writable {
-	#@ Description	: Check if $1 directory is writable by $SUDO_USER
+	#@ Description	: Check if a directory is writable by $SUDO_USER
 	#@ Options	: $1 - directory to check
 	# Return -1 if $1 is not provided
 	#[[ ${1:+X} == X ]] || return -1
@@ -75,7 +75,7 @@ function check_user_writable {
 	elif ((($PERMS & 0020) != 0)); then
 		# $1 has group write permissions
 		# Get all the groups the $USER is in
-		local Groups=($(\groups $USER))
+		local Groups=($(groups $USER))
 		for G in "${Groups[@]}"; do
 			# The $USER's group match with the $1's one
 			[[ $GROUP == $G ]] && return 0
