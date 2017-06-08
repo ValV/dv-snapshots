@@ -59,8 +59,8 @@ CMD7ZA="7z a -si -mx=9 -ms=on -mhe=on"
 ##############################################################################
 
 function check_user_writable {
-	#: Description	: Check if $1 directory is writable by $SUDO_USER
-	#: Options	: $1 - directory to check
+	#@ Description	: Check if $1 directory is writable by $SUDO_USER
+	#@ Options	: $1 - directory to check
 	# Return -1 if $1 is not provided
 	#[[ ${1:+X} == X ]] || return -1
 	local USER=$SUDO_USER
@@ -89,8 +89,8 @@ function check_user_writable {
 }
 
 function show_help {
-	#: Description	: Display usage
-	#: Options	: None
+	#@ Description	: Display usage
+	#@ Options	: None
 	printf "%s:\n" "$PRNAME"
 	set -- "${PRDESC[@]}"
 	while [[ $# > 0 ]]; do
@@ -114,6 +114,32 @@ function show_help {
 	while [[ $# > 0 ]]; do
 		printf "\t%s\t%s\n" "$1" "$2"
 		shift 2
+	done
+}
+
+function print {
+	#@ Description	: Print info, warning or error type colored message
+	#@ Options	: $1 - optional message type (one of E, W, or I)
+	#@		  $2, $3, ... arguments for printf
+	local FMTSTR=""
+	while :; do
+		case $1 in
+			I)
+				FMTSTR="\033[36;01mINFO:\033[00m "
+				shift; continue;;
+		
+			W)
+				FMTSTR="\033[33;01mWARNING:\033[00m "
+				shift; continue;;
+		
+			E)
+				FMTSTR="\033[31;01mERROR:\033[00m "
+				shift; continue;;
+		
+			*)
+				FMTSTR="$FMTSTR$1"
+				shift; printf "$FMTSTR" "$@"; break;;
+		esac
 	done
 }
 
@@ -178,7 +204,9 @@ for CFNAME in ${PRCFGS[@]}; do
 		printf "Config: %s\n" "$CFNAME"
 	fi
 done
-[[ $CERROR > 0 ]] && printf "ERROR: Config not found (%s)\n" $CERROR && exit -1
+
+# Report error and exit
+[[ $CERROR > 0 ]] && print E "Config not found (%s)\n" $CERROR && exit -1
 
 ##############################################################################
 #                          Process script commands                           #
