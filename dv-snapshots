@@ -39,6 +39,7 @@ PROPTS=("-d <path>"
 	"Destination directory to save snapshot archives"
 	"-p <password>"
 	"Password to encrypt snapshot archives (7z)")
+PRCFGS=("/usr/local/etc/dv-lvs.cfg" "/etc/dv/dv-lvs.cfg")
 
 SRCDIR="/run/${PRNAME//-//}"
 OUTDIR=""
@@ -161,6 +162,19 @@ done
 
 # Get time stamp for backup archive names
 TIMESTAMP=$(date +"%F-%H-%M-%S")
+
+# Read config file
+LVARRY=()
+for CFNAME in $PRCFGS; do
+	if [[ ${CFNAME:+X} == X ]]; then
+		printf "CFG found: %s\n" $CFNAME
+		while read; do
+			printf "LV found: %s\n" "${REPLY}"
+			LVARRY[${#LVARRY}]="$REPLY"
+		done < "$CFNAME"
+		break
+	fi
+done
 
 ##############################################################################
 #                          Process script commands                           #
