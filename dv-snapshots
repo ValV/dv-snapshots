@@ -374,6 +374,7 @@ case $1 in
 				$CMD7ZA $OUTDIR/${M##*/}-$TIMESTAMP.tar.7z"
 			echo -en "\033[01;32m${M##*/}:\033[00m "
 			echo $COMMAND
+			eval $COMMAND
 		done < <(printf "%s\n" "${MTDIRS[@]}")
 		;;
 	*)
