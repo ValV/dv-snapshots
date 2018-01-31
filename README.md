@@ -16,11 +16,11 @@ E.g.
 	vg1/lv1:320:--exclude=./lost+found
 	vg1/lv2:191:
 
-Which tells to backup logical volumes *lv1* and *lv2* from volume group *vg1*. The first volume requires 320 physical extents for the snapshot and the second volume requires 191 PE for its snapshot, assuming that the volume group *vg1* has 511 free PEs in it. Also for the first logical volume *lv1* tar will avoid *lost+found* directory in the filesystem root.
+Which tells to backup logical volumes *lv1* and *lv2* from volume group *vg1*. The first volume requires 320 physical extents for the snapshot and the second volume requires 191 PE for its snapshot, assuming that the volume group *vg1* has 511 free PEs in it. Also for the first logical volume *lv1* *tar* will avoid *lost+found* directory in the filesystem root.
 
 ## Free space in the volume group
 
-LVM requires free space somwhere in the volume group. Consider the following:
+LVM requires free space somewhere in the volume group. Consider the following:
 
 ```
 +------------------------------Volume group-------------------------------+
