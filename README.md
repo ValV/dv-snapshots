@@ -8,7 +8,9 @@ This program is a bash script for LVM snapshot automation. The script requires *
 `dv-snapshots` reads LVM logical volumes to backup from `/usr/local/etc/dv-lvs.cfg` and `/etc/dv/dv-lvs.cfg` in that order.
 
 Configuration file structure must be as follows:
+
 	volume_group/logical_volume:number_of_extents:tar_options
+
 E.g.
 
 	vg1/lv1:320:--exclude=./lost+found
