@@ -45,7 +45,7 @@ Snapshot filesystems for backup are mounted under `/run/dv/shapshots`. For the e
 	/run/dv/snapshots/slv1
 	/run/dv/snapshots/slv2
 
-Where `s` is a prefix (can be changed inside the script - PREFIX variable). Also directory name under `/run` is composed upon the script's name, where all the `-` (hyphens) are replaced with `/` (slashes). E.g. for the script named `my-awesome-script` and prefix `snap-` mountpoints will be:
+Where `s` is a prefix (can be changed inside the script - `PREFIX` variable). Also directory name under `/run` is composed upon the script's name, where all the `-` (hyphens) are replaced with `/` (slashes). E.g. for the script named `my-awesome-script` and prefix `snap-` mountpoints will be:
 
 	/run/my/awesome/script/snap-lv1
 	/run/my/awesome/script/snap-lv2
